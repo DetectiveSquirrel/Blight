@@ -74,7 +74,6 @@ namespace Blight
             if (entity.Metadata == "Metadata/Terrain/Leagues/Blight/Objects/BlightPathway")
             {
                 BlightEntities.Add(entity);
-                LogMessage($@"Added: {entity.Metadata}, POS: {entity.GridPosNum}");
             }
         }
 
