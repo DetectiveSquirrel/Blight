@@ -58,24 +58,24 @@ public class Main : BaseSettingsPlugin<BlightSettings>
     {
         drawList.Clear();
 
-        if (!Settings.Enable || areaPumpStopped)
+        if (!Settings.Enable || !GameController.InGame || areaPumpStopped)
             return null;
 
-        _playerGridPos = GameController.Player.GetComponent<Positioned>().WorldPosNum.WorldToGrid();
+        var Player = GameController?.Player;
+        if (Player == null)
+            return null;
+
+        _playerGridPos = Player.GetComponent<Positioned>().WorldPosNum.WorldToGrid();
         var ingameUi = GameController.Game.IngameState.IngameUi;
         var map = ingameUi.Map;
         var largeMap = map.LargeMap.AsObject<SubMap>();
         _largeMapOpen = largeMap.IsVisible;
         _mapScale = GameController.IngameState.Camera.Height / 677f * largeMap.Zoom;
         _mapCenter = largeMap.GetClientRect().TopLeft.ToVector2Num() + largeMap.ShiftNum + largeMap.DefaultShiftNum;
-        _playerZ = GameController.Player.GetComponent<Render>().Z;
+        _playerZ = Player.GetComponent<Render>().Z;
         var sortedList = BlightEntities.OrderByDescending(item => item.Id).ToList();
         drawList = sortedList;
         IngameData = GameController.IngameState.Data;
-        var Player = GameController?.Player;
-
-        if (Player == null)
-            return null;
 
         PlayerPos = IngameData.ToWorldWithTerrainHeight(Player.PosNum);
 
