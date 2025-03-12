@@ -38,6 +38,7 @@ public class Pathway
 [Submenu(CollapsedByDefault = false)]
 public class TowerList
 {
+    public ToggleNode FollowWorldTerrain { get; set; } = new(false);
     public TowerSettings FireTower { get; set; } = new()
     {
         DrawGround = new ToggleNode(true),

@@ -115,10 +115,10 @@ public class Main : BaseSettingsPlugin<BlightSettings>
             return;
 
         if (towerSetting.DrawGround && isWithinScreen)
-            Graphics.DrawCircleInWorld(tower.PosNum, worldRadius, towerSetting.Color, towerSetting.CircleThickness, 40);
+            Graphics.DrawCircleInWorld(tower.PosNum, worldRadius, towerSetting.Color, towerSetting.CircleThickness, 40, Settings.Towers.FollowWorldTerrain.Value);
 
         if (towerSetting.DrawMap && LargeMapOpen)
-            Graphics.DrawCircleOnLargeMap(tower.GridPosNum, true, radius, towerSetting.Color, towerSetting.CircleThickness / 4, 40);
+            Graphics.DrawCircleOnLargeMap(tower.GridPosNum, Settings.Towers.FollowWorldTerrain.Value, radius, towerSetting.Color, towerSetting.CircleThickness / 4, 40);
     }
 
     public override void EntityAdded(Entity entity)
