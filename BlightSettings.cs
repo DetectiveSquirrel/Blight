@@ -1,4 +1,4 @@
-﻿using ExileCore.Shared.Attributes;
+using ExileCore.Shared.Attributes;
 using ExileCore.Shared.Interfaces;
 using ExileCore.Shared.Nodes;
 using SharpDX;
@@ -27,6 +27,7 @@ public class BlightSettings : ISettings
 [Submenu(CollapsedByDefault = false)]
 public class Pathway
 {
+    public ToggleNode DisableWhenPathwayClosed { get; set; } = new(true);
     public ColorNode MapColor { get; set; } = new Color(255,255,255, 111);
     public ColorNode WorldColor { get; set; } = new Color(194,200, 0, 57);
     public RangeNode<int> MapLineWidth { get; set; } = new(3, 1, 100);
