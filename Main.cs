@@ -12,10 +12,13 @@ namespace Blight;
 
 public class Main : BaseSettingsPlugin<BlightSettings>
 {
+    private readonly List<BlightTowerEntry> _blightTowerEntries = new();
     private readonly Dictionary<uint, bool> _pathwayClosed = new();
+    private readonly Dictionary<string, int> _towerRadiusById = new();
+
     public Entity AreaPumpEntity { get; private set; }
     public bool AreaPumpStopped { get; private set; }
-    public List<Entity> BlightPathways { get; private set; } = new();
+    public List<Entity> BlightPathways => PathwayEntityList;
     public bool LargeMapOpen { get; private set; }
 
     public List<Entity> PathwayEntityList { get; } = new();
@@ -36,7 +39,9 @@ public class Main : BaseSettingsPlugin<BlightSettings>
     {
         PathwayEntityList.Clear();
         TowerEntityList.Clear();
+        _blightTowerEntries.Clear();
         _pathwayClosed.Clear();
+        _towerRadiusById.Clear();
         AreaPumpEntity = null;
         AreaPumpStopped = false;
     }
@@ -46,7 +51,6 @@ public class Main : BaseSettingsPlugin<BlightSettings>
         if (!Settings.Enable || !GameController.InGame || AreaPumpStopped) return null;
 
         LargeMapOpen = GameController.Game.IngameState.IngameUi.Map.LargeMap.IsVisible;
-        BlightPathways = PathwayEntityList.OrderByDescending(item => item.Id).ToList();
 
         if (AreaPumpEntity != null &&
             AreaPumpEntity.TryGetComponent<StateMachine>(out var stateComponent) &&
@@ -59,7 +63,9 @@ public class Main : BaseSettingsPlugin<BlightSettings>
 
     public override void Render()
     {
-        if (!Settings.Enable || AreaPumpStopped || !GameController.InGame || GameController.IngameState.Data == null) return;
+        if (!Settings.Enable || !GameController.InGame || GameController.IngameState.Data == null || AreaPumpStopped) return;
+
+        if (!HasAnythingToDrawThisFrame()) return;
 
         var inGameUi = GameController.Game.IngameState.IngameUi;
 
@@ -69,63 +75,93 @@ public class Main : BaseSettingsPlugin<BlightSettings>
 
         if (!Settings.IgnoreLargePanels && inGameUi.LargePanels.Any(x => x.IsVisible)) return;
 
-        DrawBlightPaths(BlightPathways);
-        DrawTowers(TowerEntityList);
+        var screen = ScreenRect();
+        DrawBlightPaths(PathwayEntityList, screen);
+        DrawTowers(screen);
     }
 
-    private void DrawTowers(List<Entity> towerList)
+    private bool HasAnythingToDrawThisFrame()
     {
-        foreach (var tower in towerList)
+        if (_blightTowerEntries.Count > 0) return true;
+
+        var paths = Settings.Pathways;
+        if (PathwayEntityList.Count < 2) return false;
+
+        return paths.DrawWorld || paths.DrawMap && LargeMapOpen;
+    }
+
+    private void DrawTowers(RectangleF screen)
+    {
+        if (_blightTowerEntries.Count == 0) return;
+
+        var followTerrain = Settings.Towers.FollowWorldTerrain.Value;
+
+        foreach (var entry in _blightTowerEntries)
         {
-            if (!tower.TryGetComponent<BlightTower>(out var blightTowerComp)) continue;
+            var radius = entry.Radius;
+            if (radius < 0)
+            {
+                radius = GetTowerRadiusCached(entry.TowerId);
+                if (radius < 0) continue;
+                entry.Radius = radius;
+            }
 
-            var radius = GetTowerRadius(blightTowerComp.Id);
-            if (radius == -1) continue;
-
-            DrawTower(tower, blightTowerComp.Id, radius);
+            DrawTower(entry, radius, screen, followTerrain);
         }
     }
 
-    private void DrawTower(Entity tower, string towerId, int radius)
+    private void DrawTower(BlightTowerEntry entry, int radius, RectangleF screen, bool followTerrain)
     {
+        var tower = entry.Entity;
         var worldRadius = radius / PoeMapExtension.WorldToGridConversion;
-        var isWithinScreen = IsEntityWithinScreen(tower.PosNum, GetScreenSize(), 200);
+        var isWithinScreen = IsEntityWithinScreen(tower.PosNum, screen, 200);
 
-        var towerSetting = towerId switch
+        var draw = entry.Settings.DrawStyle;
+
+        if (draw.Ground.Draw && isWithinScreen)
         {
-            "FlameTower1" or "FlameTower2" or "FlameTower3" or "MeteorTower" or "FlamethrowerTower" => Settings.Towers.FireTower,
+            switch (draw.Ground.Style)
+            {
+                case CircleDrawStyle.Filled:
+                    Graphics.DrawFilledCircleInWorld(tower.PosNum, worldRadius, draw.Ground.Color, 40, followTerrain);
+                    break;
+                case CircleDrawStyle.Outline:
+                    Graphics.DrawCircleInWorld(tower.PosNum, worldRadius, draw.Ground.Color, draw.CircleThickness, 40, followTerrain);
+                    break;
+            }
+        }
 
-            "ChillingTower1" or "ChillingTower2" or "ChillingTower3" or "FreezingTower" or "IcePrisonTower" => Settings.Towers.ColdTower,
-
-            "ShockingTower1" or "ShockingTower2" or "ShockingTower3" or "LightningStormTower" or "ArcingTower" => Settings.Towers.LightningTower,
-
-            "StunningTower1" or "StunningTower2" or "StunningTower3" or "TemporalTower" or "PetrificationTower" => Settings.Towers.PhysicalTower,
-
-            "MinionTower1" or "MinionTower2" or "MinionTower3" or "FlyingMinionTower" or "TankyMinionTower" => Settings.Towers.MinionTower,
-
-            "BuffTower1" or "BuffTower2" or "BuffTower3" or "BuffPlayersTower" or "WeakenEnemiesTower" => Settings.Towers.BuffTower,
-
-            _ => null
-        };
-
-        if (towerSetting == null) return;
-
-        if (towerSetting.DrawGround && isWithinScreen)
-            Graphics.DrawCircleInWorld(tower.PosNum, worldRadius, towerSetting.Color, towerSetting.CircleThickness, 40, Settings.Towers.FollowWorldTerrain.Value);
-
-        if (towerSetting.DrawMap && LargeMapOpen)
-            Graphics.DrawCircleOnLargeMap(tower.GridPosNum, Settings.Towers.FollowWorldTerrain.Value, radius, towerSetting.Color, towerSetting.CircleThickness / 4, 40);
+        if (draw.Map.Draw && LargeMapOpen)
+        {
+            switch (draw.Map.Style)
+            {
+                case CircleDrawStyle.Filled:
+                    Graphics.DrawFilledCircleOnLargeMap(tower.GridPosNum, followTerrain, radius, draw.Map.Color, 40);
+                    break;
+                case CircleDrawStyle.Outline:
+                    Graphics.DrawCircleOnLargeMap(tower.GridPosNum, followTerrain, radius, draw.Map.Color, draw.CircleThickness / 4, 40);
+                    break;
+            }
+        }
     }
 
     public override void EntityAdded(Entity entity)
     {
         if (entity.Metadata == "Metadata/Terrain/Leagues/Blight/Objects/BlightPathway")
         {
-            PathwayEntityList.Add(entity);
+            InsertPathwaySortedByIdDesc(PathwayEntityList, entity);
             PathwayClosed(entity);
         }
 
-        if (entity.TryGetComponent<BlightTower>(out var blightComp)) TowerEntityList.Add(entity);
+        if (entity.TryGetComponent<BlightTower>(out var blightComp))
+        {
+            var settings = ResolveTowerSettings(blightComp.Id);
+            if (settings != null)
+            {
+                TowerEntityList.Add(entity);
+                _blightTowerEntries.Add(new BlightTowerEntry(entity, blightComp.Id, settings, GetTowerRadiusCached(blightComp.Id)));
+            }
+        }
 
         if (entity.Metadata == "Metadata/Terrain/Leagues/Blight/Objects/BlightPump") AreaPumpEntity = entity;
     }
@@ -138,9 +174,31 @@ public class Main : BaseSettingsPlugin<BlightSettings>
             _pathwayClosed.Remove(entity.Id);
         }
 
-        var entityToRemove = TowerEntityList.FirstOrDefault(tower => tower.Id == entity.Id);
+        TowerEntityList.RemoveAll(t => t.Id == entity.Id);
+        _blightTowerEntries.RemoveAll(t => t.Entity.Id == entity.Id);
+    }
 
-        if (entityToRemove != null) TowerEntityList.Remove(entityToRemove);
+    private TowerSettings? ResolveTowerSettings(string towerId) => towerId switch
+    {
+        "FlameTower1" or "FlameTower2" or "FlameTower3" or "MeteorTower" or "FlamethrowerTower" => Settings.Towers.FireTower,
+        "ChillingTower1" or "ChillingTower2" or "ChillingTower3" or "FreezingTower" or "IcePrisonTower" => Settings.Towers.ColdTower,
+        "ShockingTower1" or "ShockingTower2" or "ShockingTower3" or "LightningStormTower" or "ArcingTower" => Settings.Towers.LightningTower,
+        "StunningTower1" or "StunningTower2" or "StunningTower3" or "TemporalTower" or "PetrificationTower" => Settings.Towers.PhysicalTower,
+        "MinionTower1" or "MinionTower2" or "MinionTower3" or "FlyingMinionTower" or "TankyMinionTower" => Settings.Towers.MinionTower,
+        "BuffTower1" or "BuffTower2" or "BuffTower3" or "BuffPlayersTower" or "WeakenEnemiesTower" => Settings.Towers.BuffTower,
+        _ => null
+    };
+
+    private static void InsertPathwaySortedByIdDesc(List<Entity> list, Entity entity)
+    {
+        var id = entity.Id;
+        var i = 0;
+        for (; i < list.Count; i++)
+        {
+            if (list[i].Id < id) break;
+        }
+
+        list.Insert(i, entity);
     }
 
     private bool PathwayClosed(Entity e)
@@ -153,36 +211,46 @@ public class Main : BaseSettingsPlugin<BlightSettings>
         }
     }
 
-    public void DrawBlightPaths(List<Entity> drawingOrder)
+    private void DrawBlightPaths(List<Entity> drawingOrder, RectangleF screen)
     {
         if (drawingOrder == null || drawingOrder.Count < 2) return;
+
+        var p = Settings.Pathways;
+        var drawMap = p.DrawMap && LargeMapOpen;
+        var drawWorld = p.DrawWorld;
+        if (!drawMap && !drawWorld) return;
+
+        var skipClosed = p.DisableWhenPathwayClosed.Value;
 
         for (var i = 0; i < drawingOrder.Count - 1; i++)
         {
             var entity1 = drawingOrder[i];
             var entity2 = drawingOrder[i + 1];
 
-            if (Settings.Pathways.DisableWhenPathwayClosed.Value && PathwayClosed(entity1)) continue;
+            if (skipClosed && PathwayClosed(entity1)) continue;
 
             if (entity1.Id - entity2.Id > 1 || entity1.Distance(entity2) > 35) continue;
 
-            if (Settings.Pathways.DrawMap && LargeMapOpen) Graphics.DrawLineOnLargeMap(entity1.GridPosNum, entity2.GridPosNum, Settings.Pathways.MapLineWidth, Settings.Pathways.MapColor);
+            if (drawMap) Graphics.DrawLineOnLargeMap(entity1.GridPosNum, entity2.GridPosNum, p.MapLineWidth, p.MapColor);
 
-            if (Settings.Pathways.DrawWorld && IsEntityWithinScreen(entity1.PosNum, GetScreenSize(), 200))
-                Graphics.DrawLineInWorld(entity1.GridPosNum, entity2.GridPosNum, Settings.Pathways.WorldLineWidth, Settings.Pathways.WorldColor);
+            if (drawWorld && IsEntityWithinScreen(entity1.PosNum, screen, 200)) Graphics.DrawLineInWorld(entity1.GridPosNum, entity2.GridPosNum, p.WorldLineWidth, p.WorldColor);
         }
     }
 
-    public RectangleF GetScreenSize()
+    private RectangleF ScreenRect()
     {
         var size = GameController.Window.GetWindowRectangleTimeCache.Size;
         return new RectangleF {X = 0, Y = 0, Width = size.Width, Height = size.Height};
     }
 
-    public int GetTowerRadius(string blightTowerId)
+    private int GetTowerRadiusCached(string blightTowerId)
     {
+        if (_towerRadiusById.TryGetValue(blightTowerId, out var cached)) return cached;
+
         var record = GameController.Game.Files.BlightTowers.EntriesList.FirstOrDefault(r => r.Id == blightTowerId);
-        return record?.Radius ?? -1;
+        cached = record?.Radius ?? -1;
+        _towerRadiusById[blightTowerId] = cached;
+        return cached;
     }
 
     private static bool IsEntityWithinScreen(Vector3 entityPos, RectangleF screenSize, float allowancePx)
@@ -195,5 +263,13 @@ public class Main : BaseSettingsPlugin<BlightSettings>
         var bottomBound = screenSize.Bottom + allowancePx;
 
         return entityScreenPos.X >= leftBound && entityScreenPos.X <= rightBound && entityScreenPos.Y >= topBound && entityScreenPos.Y <= bottomBound;
+    }
+
+    private sealed class BlightTowerEntry(Entity entity, string towerId, TowerSettings settings, int radius)
+    {
+        public int Radius = radius;
+        public Entity Entity { get; } = entity;
+        public string TowerId { get; } = towerId;
+        public TowerSettings Settings { get; } = settings;
     }
 }
